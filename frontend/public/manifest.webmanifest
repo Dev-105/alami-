@@ -1,0 +1,19 @@
+{
+  "name": "الحانوت ديال الحلاقة",
+  "short_name": "النوبة",
+  "description": "تسيير النوبة ديال الحلاقين",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f3ed",
+  "theme_color": "#171717",
+  "dir": "rtl",
+  "lang": "ar-MA",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
