@@ -227,7 +227,7 @@ function BarberDashboard({ session }) {
 }
 
 function OwnerSettings({ session }) {
-  const [state, setState] = useState({ barbers: [], ads: [] }); const [name, setName] = useState(""); const [password, setPassword] = useState(""); const [ad, setAd] = useState({ imageUrl: "", description: "" }); const navigate = useNavigate();
+  const [state, setState] = useState({ barbers: [], ads: [] }); const [name, setName] = useState(""); const [password, setPassword] = useState(""); const [ad, setAd] = useState({ imageUrl: "", description: "" }); const [editingAdId, setEditingAdId] = useState(null); const navigate = useNavigate();
   const [confirmation, setConfirmation] = useState(null);
   const [error, setError] = useState("");
   useStatePolling(setState, setError);
@@ -259,19 +259,43 @@ function OwnerSettings({ session }) {
   async function saveAd(e) {
     e.preventDefault();
     if (!ad.description.trim() && !ad.imageUrl.trim()) return;
-    const nextAd = { ...ad, id: state.ads[0]?.id };
-    const ads = state.ads.length >= 3 ? [nextAd, ...state.ads.slice(1)] : [...state.ads, nextAd];
+    const nextAd = { ...ad, id: editingAdId || `ad${Date.now()}` };
+    const ads = editingAdId
+      ? state.ads.map((item) => item.id === editingAdId ? nextAd : item)
+      : state.ads.length >= 3 ? [nextAd, ...state.ads.slice(1)] : [...state.ads, nextAd];
     try {
       const nextState = await request("/ads", { method: "PUT", body: JSON.stringify({ ads }) });
       setState(nextState);
       setAd({ imageUrl: "", description: "" });
+      setEditingAdId(null);
       setError("");
     } catch (error) {
       setError(error.message);
     }
   }
+  function editAd(item) {
+    setEditingAdId(item.id);
+    setAd({ imageUrl: item.imageUrl || "", description: item.description || "" });
+    setError("");
+  }
+  async function removeAd(item) {
+    try {
+      const nextState = await request("/ads", {
+        method: "PUT",
+        body: JSON.stringify({ ads: state.ads.filter((current) => current.id !== item.id) }),
+      });
+      setState(nextState);
+      if (editingAdId === item.id) {
+        setEditingAdId(null);
+        setAd({ imageUrl: "", description: "" });
+      }
+      setError("");
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  }
   // OWNER DASHBOARD VIEW (/admin/owner): barber and advertisement management
-  return <><header className="admin-head"><div><span className="eyebrow">OWNER MODE</span><h2>الإعدادات</h2></div><button className="mini-link" onClick={() => { localStorage.removeItem("adminSession"); navigate("/admin/login"); }}><Icon name="box-arrow-right" />خروج</button></header><section className="admin-content settings-content"><div className="owner-tabs"><Link to="/admin/barber"><Icon name="scissors" />الخدمة</Link><span className="selected"><Icon name="gear" />الإعدادات</span></div><section className="panel"><div className="section-title"><h3>الحلاقين</h3><span>{state.barbers.length}/∞</span></div><form onSubmit={addBarber} className="stack-form"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="اسم الحلاق" /><input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="الباسوورد" /><Button type="submit"><Icon name="plus-lg" />زيد حلاق</Button></form>{state.barbers.map((barber) => <div className="manage-row" key={barber.id}><span>{barber.name}</span><div><Button className="small secondary" onClick={() => editBarber(barber)}><Icon name="pencil" />بدل</Button><Button className="small danger" onClick={() => removeBarber(barber)}><Icon name="trash3" />حدف</Button></div></div>)}</section><section className="panel"><div className="section-title"><h3>الإعلانات <span className="stamp">AD</span></h3><span>{state.ads.length}/3</span></div><form onSubmit={saveAd} className="stack-form"><input value={ad.imageUrl} onChange={(e) => setAd({ ...ad, imageUrl: e.target.value })} placeholder="رابط الصورة (اختياري)" /><textarea value={ad.description} onChange={(e) => setAd({ ...ad, description: e.target.value })} placeholder="النص ديال الإعلان" rows="3" /><Button type="submit" disabled={!ad.description.trim() && !ad.imageUrl.trim()}><Icon name="save" />{state.ads.length >= 3 ? "بدل الإعلان" : "حفظ الإعلان"}</Button></form></section><ErrorText error={error} /></section>{confirmation && <ConfirmationModal {...confirmation} onCancel={() => setConfirmation(null)} />}</>;
+  return <><header className="admin-head"><div><span className="eyebrow">OWNER MODE</span><h2>الإعدادات</h2></div><button className="mini-link" onClick={() => { localStorage.removeItem("adminSession"); navigate("/admin/login"); }}><Icon name="box-arrow-right" />خروج</button></header><section className="admin-content settings-content"><div className="owner-tabs"><Link to="/admin/barber"><Icon name="scissors" />الخدمة</Link><span className="selected"><Icon name="gear" />الإعدادات</span></div><section className="panel"><div className="section-title"><h3>الحلاقين</h3><span>{state.barbers.length}/∞</span></div><form onSubmit={addBarber} className="stack-form"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="اسم الحلاق" /><input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="الباسوورد" /><Button type="submit"><Icon name="plus-lg" />زيد حلاق</Button></form>{state.barbers.map((barber) => <div className="manage-row" key={barber.id}><span>{barber.name}</span><div><Button className="small secondary" onClick={() => editBarber(barber)}><Icon name="pencil" />بدل</Button><Button className="small danger" onClick={() => removeBarber(barber)}><Icon name="trash3" />حدف</Button></div></div>)}</section><section className="panel"><div className="section-title"><h3>الإعلانات <span className="stamp">AD</span></h3><span>{state.ads.length}/3</span></div><form onSubmit={saveAd} className="stack-form"><input value={ad.imageUrl} onChange={(e) => setAd({ ...ad, imageUrl: e.target.value })} placeholder="رابط الصورة (اختياري)" /><textarea value={ad.description} onChange={(e) => setAd({ ...ad, description: e.target.value })} placeholder="النص ديال الإعلان" rows="3" /><div className="ad-form-actions"><Button type="submit" disabled={!ad.description.trim() && !ad.imageUrl.trim()}><Icon name={editingAdId ? "pencil" : "save"} />{editingAdId ? "حفظ التعديل" : state.ads.length >= 3 ? "بدل الإعلان" : "حفظ الإعلان"}</Button>{editingAdId && <Button type="button" className="secondary" onClick={() => { setEditingAdId(null); setAd({ imageUrl: "", description: "" }); }}>إلغاء</Button>}</div></form><div className="ads-list">{state.ads.length ? state.ads.map((item) => <article className="ad-manage-row" key={item.id}>{item.imageUrl && <img src={item.imageUrl} alt="" /> }<div className="ad-manage-copy"><span className="stamp">AD</span><p>{item.description || "إعلان بلا نص"}</p>{item.imageUrl && <small>{item.imageUrl}</small>}</div><div className="ad-manage-actions"><Button className="small secondary" onClick={() => editAd(item)}><Icon name="pencil" />بدل</Button><Button className="small danger" onClick={() => removeAd(item)}><Icon name="trash3" />حدف</Button></div></article>) : <p className="empty">ما كاين حتى إعلان دابا.</p>}</div></section><ErrorText error={error} /></section>{confirmation && <ConfirmationModal {...confirmation} onCancel={() => setConfirmation(null)} />}</>;
 }
 
 export function AdminView() {
