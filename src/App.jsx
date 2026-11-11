@@ -21,7 +21,7 @@ async function request(path, options = {}) {
 function Shell({ children, title = "Line & Blade" }) {
   return <main className="page"><div className="app-shell"><header className="brand"><div><span className="eyebrow">BARBERSHOP QUEUE</span><h1>{title}</h1></div><Link className="mini-link" to="/admin/login"><Icon name="box-arrow-in-left" />دخول الإدارة</Link></header>{children}</div></main>;
 }
-function Icon({ name }) { return <i className={`bi bi-${name}`} aria-hidden="true" />; }
+function Icon({ name, className = "" }) { return <i className={`bi bi-${name} ${className}`} aria-hidden="true" />; }
 function Button({ children, className = "", ...props }) { return <button className={`button ${className}`} {...props}>{children}</button>; }
 function ErrorText({ error }) { return error ? <p className="error">{error}</p> : null; }
 function barberStatus(barber) {
@@ -46,6 +46,7 @@ function ClientView() {
   const [selectedId, setSelectedId] = useState(localStorage.getItem("selectedBarber") || "");
   const [name, setName] = useState(localStorage.getItem("clientName") || "");
   const [ticket, setTicket] = useState(JSON.parse(localStorage.getItem("clientTicket") || "null"));
+  const [joining, setJoining] = useState(false);
   const [error, setError] = useState("");
   const [switchOpen, setSwitchOpen] = useState(false);
   const [confirmation, setConfirmation] = useState(null);
@@ -96,7 +97,18 @@ function ClientView() {
   const myTurn = currentTicket === selected?.currentlyServing;
   function rememberTicket(next) { setTicket(next); localStorage.setItem("clientTicket", JSON.stringify(next)); }
   async function join() {
-    try { localStorage.setItem("clientName", name); const result = await request("/queue", { method: "POST", body: JSON.stringify({ action: "join", barberId: selected.id, name, clientId }) });     rememberTicket({ ...result.client, barberId: selected.id, date: new Date().toISOString().slice(0, 10) }); setError(""); } catch (e) { setError(e.message); }
+    if (joining || !selected) return;
+    setJoining(true);
+    setError("");
+    try {
+      localStorage.setItem("clientName", name);
+      const result = await request("/queue", { method: "POST", body: JSON.stringify({ action: "join", barberId: selected.id, name, clientId }) });
+      rememberTicket({ ...result.client, barberId: selected.id, date: new Date().toISOString().slice(0, 10) });
+    } catch (error) {
+      setError(error.message);
+    } finally {
+      setJoining(false);
+    }
   }
   async function leave() { if (!activeTicket) return; await request("/queue", { method: "POST", body: JSON.stringify({ action: "leave", barberId: activeTicket.barberId, clientId }) }); rememberTicket(null); }
   function transferBarber(targetChairId) {
@@ -139,7 +151,7 @@ function ClientView() {
     <nav className="barber-tabs" aria-label="الحلاقين">{state.barbers.map((barber) => <button key={barber.id} className={barber.id === selected?.id ? "active" : ""} onClick={() => { setSelectedId(barber.id); localStorage.setItem("selectedBarber", barber.id); }}>{barber.name}<small className={`${barberStatus(barber).toLowerCase()}-dot`}>{barberStatus(barber) === "OPEN" ? "شغال" : barberStatus(barber) === "PAUSED" ? "استراحة" : "ساليت اليوم"}</small></button>)}</nav>
     {selected && <><div className="serving-card"><span>دابا فـ الكرسي</span><strong>#{selected.currentlyServing || "—"}</strong><small>{selected.name}</small></div>
       {barberStatus(selected) === "PAUSED" && <div className="paused-badge"><Icon name="pause-circle" />غير متاح حالياً - يمكنك شد النوبة</div>}
-      {!activeTicket ? <section className="panel"><label>السميّة ديالك<input value={name} onChange={(e) => { setName(e.target.value); localStorage.setItem("clientName", e.target.value); }} placeholder="مثال: أمين" /></label><Button disabled={!name.trim() || barberStatus(selected) === "CLOSED_FOR_DAY"} onClick={join}>{barberStatus(selected) === "CLOSED_FOR_DAY" ? "ساليت الخدمة اليوم" : `شد النوبة عند ${selected.name}`}</Button></section> :
+      {!activeTicket ? <section className="panel"><label>السميّة ديالك<input value={name} onChange={(e) => { setName(e.target.value); localStorage.setItem("clientName", e.target.value); }} placeholder="مثال: أمين" /></label><Button disabled={joining || !name.trim() || barberStatus(selected) === "CLOSED_FOR_DAY"} onClick={join}>{joining ? <><Icon name="arrow-repeat" className="loading-spinner" />جاري حجز نوبتك...</> : barberStatus(selected) === "CLOSED_FOR_DAY" ? "ساليت الخدمة اليوم" : `شد النوبة عند ${selected.name}`}</Button></section> :
         selected.id !== queuedBarber.id ? <section className="panel switch-prompt"><span>عندك نوبة مع {queuedBarber.name}</span><Button disabled={!selected.isOpen} onClick={() => requestBarberSwitch(selected.id)}><Icon name="arrow-left-right" />تحول لعند {selected.name}</Button></section> :
         <section className={myTurn ? "turn-card" : "ticket-card"}><span>{myTurn ? "وصلات نوبتك!" : "النمرة ديالك"}</span><strong>#{currentTicket}</strong>{myTurn ? <p><Icon name="scissors" /> دخل عند الحلاق، راه كيتسناك</p> : <div className="actions"><Button className="secondary" onClick={() => setSwitchOpen(true)}><Icon name="arrow-left-right" />بدل الحلاق</Button><Button className="danger" onClick={requestLeave}><Icon name="box-arrow-right" />انسحاب</Button></div>}</section>}
     </>}

@@ -208,6 +208,8 @@ input:focus, select:focus, textarea:focus {
 .switch-options button:active, .modal-close:active { transform: scale(.97); }
 .button:hover { filter: brightness(1.08); }
 .button:disabled { opacity: .30; cursor: not-allowed; box-shadow: none; filter: none; }
+.loading-spinner { display: inline-block; margin-inline-end: 8px; animation: spin 900ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .button.secondary {
   color: #b0c2b7;
