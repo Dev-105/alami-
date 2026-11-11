@@ -103,6 +103,7 @@ function ClientView() {
     try {
       localStorage.setItem("clientName", name);
       const result = await request("/queue", { method: "POST", body: JSON.stringify({ action: "join", barberId: selected.id, name, clientId }) });
+      if (result.state) setState(result.state);
       rememberTicket({ ...result.client, barberId: selected.id, date: new Date().toISOString().slice(0, 10) });
     } catch (error) {
       setError(error.message);
@@ -119,6 +120,7 @@ function ClientView() {
     request("/queue", { method: "POST", body: JSON.stringify({ action: "switch", clientId, fromBarberId: sourceChairId, toBarberId: targetChairId, name: name || handoff?.clientName }) }).then((result) => {
       setSelectedId(targetChairId);
       localStorage.setItem("selectedBarber", targetChairId);
+      if (result.state) setState(result.state);
       rememberTicket({ ...result.client, barberId: targetChairId, date: new Date().toISOString().slice(0, 10) });
       setHandoff(null);
       setSwitchOpen(false);
@@ -150,6 +152,13 @@ function ClientView() {
   return <Shell><section className="intro"><p className="kicker">خد نوبتك بلا صداع</p><h2>اختار الحلاق ديالك</h2><p className="muted">شوف شحال باقي ليك وخليك مرتاح.</p></section>
     <nav className="barber-tabs" aria-label="الحلاقين">{state.barbers.map((barber) => <button key={barber.id} className={barber.id === selected?.id ? "active" : ""} onClick={() => { setSelectedId(barber.id); localStorage.setItem("selectedBarber", barber.id); }}>{barber.name}<small className={`${barberStatus(barber).toLowerCase()}-dot`}>{barberStatus(barber) === "OPEN" ? "شغال" : barberStatus(barber) === "PAUSED" ? "استراحة" : "ساليت اليوم"}</small></button>)}</nav>
     {selected && <><div className="serving-card"><span>دابا فـ الكرسي</span><strong>#{selected.currentlyServing || "—"}</strong><small>{selected.name}</small></div>
+      <section className="queue-preview" aria-label={`النوبة عند ${selected.name}`}>
+        <div className="queue-preview-heading"><strong>النوبة دابا</strong><span className="waiting-count">{selected.queue.length ? `${selected.queue.length} أشخاص فـ الانتظار` : "لا يوجد انتظار - دورك فوراً!"}</span></div>
+        {selected.queue.length ? <div className="waiting-tickets" role="list" aria-label="أرقام الانتظار">{selected.queue.map((client) => {
+          const isMine = client.id === clientId;
+          return <span className={`waiting-ticket${isMine ? " mine" : ""}`} role="listitem" key={client.id}><span>#{client.ticket}</span>{isMine && <small>نوبتك</small>}</span>;
+        })}</div> : <div className="empty-queue"><Icon name="check-circle-fill" />لا يوجد انتظار - دورك فوراً!</div>}
+      </section>
       {barberStatus(selected) === "PAUSED" && <div className="paused-badge"><Icon name="pause-circle" />غير متاح حالياً - يمكنك شد النوبة</div>}
       {!activeTicket ? <section className="panel"><label>السميّة ديالك<input value={name} onChange={(e) => { setName(e.target.value); localStorage.setItem("clientName", e.target.value); }} placeholder="مثال: أمين" /></label><Button disabled={joining || !name.trim() || barberStatus(selected) === "CLOSED_FOR_DAY"} onClick={join}>{joining ? <><Icon name="arrow-repeat" className="loading-spinner" />جاري حجز نوبتك...</> : barberStatus(selected) === "CLOSED_FOR_DAY" ? "ساليت الخدمة اليوم" : `شد النوبة عند ${selected.name}`}</Button></section> :
         selected.id !== queuedBarber.id ? <section className="panel switch-prompt"><span>عندك نوبة مع {queuedBarber.name}</span><Button disabled={!selected.isOpen} onClick={() => requestBarberSwitch(selected.id)}><Icon name="arrow-left-right" />تحول لعند {selected.name}</Button></section> :

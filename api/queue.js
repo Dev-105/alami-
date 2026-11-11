@@ -1,4 +1,4 @@
-import { getData, saveData, publicState } from "../lib/store.js";
+import { allocateTicket, getData, saveData, publicState } from "../lib/store.js";
 
 function send(res, status, body) {
   res.setHeader("Content-Type", "application/json");
@@ -44,7 +44,7 @@ export default async function handler(req, res) {
       if (findClient(data, clientId)) return send(res, 409, { success: false, message: "عندك نوبة مسجلة دابا", error: "عندك نوبة مسجلة دابا" });
       const clientName = String(name || "").trim();
       if (!clientName) return send(res, 400, { success: false, message: "دخل سميتك", error: "دخل سميتك" });
-      const client = { id: clientId, name: clientName, ticket: barber.nextTicket++ };
+      const client = { id: clientId, name: clientName, ticket: allocateTicket(barber) };
       barber.queue.push(client);
       await saveData(data);
       return send(res, 200, { success: true, client, state: publicState(data) });
@@ -67,7 +67,7 @@ export default async function handler(req, res) {
       const existing = findClient(data, clientId);
       if (!existing || existing.barber.id !== fromBarberId) return send(res, 409, { success: false, message: "ما لقيناش النوبة ديالك", error: "ما لقيناش النوبة ديالك" });
       from.queue = from.queue.filter((client) => client.id !== clientId);
-      const client = { ...existing.client, name: String(name || existing.client.name).trim(), ticket: to.nextTicket++ };
+      const client = { ...existing.client, name: String(name || existing.client.name).trim(), ticket: allocateTicket(to) };
       to.queue.push(client);
       await saveData(data);
       return send(res, 200, { success: true, client, state: publicState(data) });
