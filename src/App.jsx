@@ -178,7 +178,7 @@ function BarberDashboard({ session }) {
   }
   function requestStatus(nextStatus) {
     if (nextStatus !== "CLOSED_FOR_DAY") {
-      request(`/barbers/${barber.id}/status`, { method: "PATCH", body: JSON.stringify({ status: nextStatus }) });
+      request("/barbers", { method: "PATCH", body: JSON.stringify({ action: "status", barberId: barber.id, status: nextStatus }) });
       return;
     }
     setConfirmation({
@@ -188,12 +188,12 @@ function BarberDashboard({ session }) {
       confirmLabel: "نعم، ساليت اليوم",
       danger: true,
       onConfirm: () => {
-        request(`/barbers/${barber.id}/status`, { method: "PATCH", body: JSON.stringify({ status: "CLOSED_FOR_DAY" }) });
+        request("/barbers", { method: "PATCH", body: JSON.stringify({ action: "status", barberId: barber.id, status: "CLOSED_FOR_DAY" }) });
         setConfirmation(null);
       },
     });
   }
-  return <><header className="admin-head"><div><span className="eyebrow">BARBER MODE</span><h2>{barber.name}</h2></div><button className="mini-link" onClick={() => { localStorage.removeItem("adminSession"); navigate("/admin/login"); }}><Icon name="box-arrow-right" />خروج</button></header><section className="admin-content"><div className="barber-controls"><Button onClick={() => request(`/barbers/${barber.id}/next`, { method: "POST" })}><Icon name="skip-forward-fill" />دوز اللي موراه</Button><select className={`status-select ${barberStatus(barber).toLowerCase()}`} value={barberStatus(barber)} onChange={(event) => requestStatus(event.target.value)}><option value="OPEN">شغال</option><option value="PAUSED">استراحة</option><option value="CLOSED_FOR_DAY">ساليت اليوم</option></select></div><div className="now-card"><span>دابا فـ الكرسي</span><strong>#{barber.currentlyServing || "—"}</strong></div><section className="queue-section"><div className="section-title"><h3>الناس فـ النوبة</h3><span>{barber.queue.length} مسجلين</span></div>{queue.length ? queue.map((client) => <div className="queue-row" key={client.id}><div><strong>{client.name}</strong><span>#{client.ticket}</span></div><Button className="small danger" onClick={() => requestSkip(client)}><Icon name="person-dash" />سحب</Button></div>) : <p className="empty">ما كاين حتى واحد كيتسنى.</p>}{barber.queue.length > 3 && <Button className="full secondary" onClick={() => setExpanded(!expanded)}><Icon name={expanded ? "chevron-up" : "chevron-down"} />{expanded ? "شوف أقل" : "شوف كتر"}</Button>}</section></section>{confirmation && <ConfirmationModal {...confirmation} onCancel={() => setConfirmation(null)} />}</>;
+  return <><header className="admin-head"><div><span className="eyebrow">BARBER MODE</span><h2>{barber.name}</h2></div><button className="mini-link" onClick={() => { localStorage.removeItem("adminSession"); navigate("/admin/login"); }}><Icon name="box-arrow-right" />خروج</button></header><section className="admin-content"><div className="barber-controls"><Button onClick={() => request("/barbers", { method: "POST", body: JSON.stringify({ action: "next", barberId: barber.id }) })}><Icon name="skip-forward-fill" />دوز اللي موراه</Button><select className={`status-select ${barberStatus(barber).toLowerCase()}`} value={barberStatus(barber)} onChange={(event) => requestStatus(event.target.value)}><option value="OPEN">شغال</option><option value="PAUSED">استراحة</option><option value="CLOSED_FOR_DAY">ساليت اليوم</option></select></div><div className="now-card"><span>دابا فـ الكرسي</span><strong>#{barber.currentlyServing || "—"}</strong></div><section className="queue-section"><div className="section-title"><h3>الناس فـ النوبة</h3><span>{barber.queue.length} مسجلين</span></div>{queue.length ? queue.map((client) => <div className="queue-row" key={client.id}><div><strong>{client.name}</strong><span>#{client.ticket}</span></div><Button className="small danger" onClick={() => requestSkip(client)}><Icon name="person-dash" />سحب</Button></div>) : <p className="empty">ما كاين حتى واحد كيتسنى.</p>}{barber.queue.length > 3 && <Button className="full secondary" onClick={() => setExpanded(!expanded)}><Icon name={expanded ? "chevron-up" : "chevron-down"} />{expanded ? "شوف أقل" : "شوف كتر"}</Button>}</section></section>{confirmation && <ConfirmationModal {...confirmation} onCancel={() => setConfirmation(null)} />}</>;
 }
 
 function OwnerSettings({ session }) {
@@ -210,7 +210,7 @@ function OwnerSettings({ session }) {
       children: <input className="modal-input" type="password" placeholder="الباسوورد الجديد" id="new-barber-password" />,
       onConfirm: async () => {
         const next = document.getElementById("new-barber-password")?.value.trim();
-        if (next) await request(`/barbers/${barber.id}`, { method: "PATCH", body: JSON.stringify({ password: next }) });
+        if (next) await request("/barbers", { method: "PATCH", body: JSON.stringify({ action: "edit", barberId: barber.id, password: next }) });
         setConfirmation(null);
       },
     });
@@ -222,7 +222,7 @@ function OwnerSettings({ session }) {
       message: `واش باغي تحيد ${barber.name}؟`,
       danger: true,
       confirmLabel: "حدف الحلاق",
-      onConfirm: async () => { await request(`/barbers/${barber.id}`, { method: "DELETE" }); setConfirmation(null); },
+      onConfirm: async () => { await request("/barbers", { method: "DELETE", body: JSON.stringify({ barberId: barber.id }) }); setConfirmation(null); },
     });
   }
   async function saveAd(e) { e.preventDefault(); await request("/ads", { method: "PUT", body: JSON.stringify({ ads: [...state.ads, ad].slice(0, 3) }) }); setAd({ imageUrl: "", description: "" }); }
