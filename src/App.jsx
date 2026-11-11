@@ -173,11 +173,25 @@ function Login() {
 function BarberDashboard({ session }) {
   const [state, setState] = useState({ barbers: [], ads: [] }); const barber = state.barbers.find((item) => item.id === session.barberId); const [expanded, setExpanded] = useState(false);
   const [confirmation, setConfirmation] = useState(null);
+  const [error, setError] = useState("");
   const navigate = useNavigate();
-  useStatePolling(setState);
+  useStatePolling(setState, setError);
   if (!barber) return null;
   const queue = expanded ? barber.queue : barber.queue.slice(0, 3);
   // BARBER DASHBOARD VIEW (/admin/barber): queue control for the selected chair
+  async function nextClient() {
+    if (barberStatus(barber) !== "OPEN") {
+      setError("خاص الحلاق يكون محلول باش يدوز الكليان");
+      return;
+    }
+    try {
+      const nextState = await request("/barbers", { method: "POST", body: JSON.stringify({ action: "next", barberId: barber.id }) });
+      setState(nextState);
+      setError("");
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  }
   function requestSkip(client) {
     setConfirmation({
       icon: "person-dash",
@@ -205,7 +219,7 @@ function BarberDashboard({ session }) {
       },
     });
   }
-  return <><header className="admin-head"><div><span className="eyebrow">BARBER MODE</span><h2>{barber.name}</h2></div><button className="mini-link" onClick={() => { localStorage.removeItem("adminSession"); navigate("/admin/login"); }}><Icon name="box-arrow-right" />خروج</button></header><section className="admin-content"><div className="barber-controls"><Button onClick={() => request("/barbers", { method: "POST", body: JSON.stringify({ action: "next", barberId: barber.id }) })}><Icon name="skip-forward-fill" />دوز اللي موراه</Button><select className={`status-select ${barberStatus(barber).toLowerCase()}`} value={barberStatus(barber)} onChange={(event) => requestStatus(event.target.value)}><option value="OPEN">شغال</option><option value="PAUSED">استراحة</option><option value="CLOSED_FOR_DAY">ساليت اليوم</option></select></div><div className="now-card"><span>دابا فـ الكرسي</span><strong>#{barber.currentlyServing || "—"}</strong></div><section className="queue-section"><div className="section-title"><h3>الناس فـ النوبة</h3><span>{barber.queue.length} مسجلين</span></div>{queue.length ? queue.map((client) => <div className="queue-row" key={client.id}><div><strong>{client.name}</strong><span>#{client.ticket}</span></div><Button className="small danger" onClick={() => requestSkip(client)}><Icon name="person-dash" />سحب</Button></div>) : <p className="empty">ما كاين حتى واحد كيتسنى.</p>}{barber.queue.length > 3 && <Button className="full secondary" onClick={() => setExpanded(!expanded)}><Icon name={expanded ? "chevron-up" : "chevron-down"} />{expanded ? "شوف أقل" : "شوف كتر"}</Button>}</section></section>{confirmation && <ConfirmationModal {...confirmation} onCancel={() => setConfirmation(null)} />}</>;
+  return <><header className="admin-head"><div><span className="eyebrow">BARBER MODE</span><h2>{barber.name}</h2></div><button className="mini-link" onClick={() => { localStorage.removeItem("adminSession"); navigate("/admin/login"); }}><Icon name="box-arrow-right" />خروج</button></header><section className="admin-content"><div className="barber-controls"><Button disabled={barberStatus(barber) !== "OPEN"} onClick={nextClient}><Icon name="skip-forward-fill" />دوز اللي موراه</Button><select className={`status-select ${barberStatus(barber).toLowerCase()}`} value={barberStatus(barber)} onChange={(event) => requestStatus(event.target.value)}><option value="OPEN">شغال</option><option value="PAUSED">استراحة</option><option value="CLOSED_FOR_DAY">ساليت اليوم</option></select></div><div className="now-card"><span>دابا فـ الكرسي</span><strong>#{barber.currentlyServing || "—"}</strong></div><section className="queue-section"><div className="section-title"><h3>الناس فـ النوبة</h3><span>{barber.queue.length} مسجلين</span></div>{queue.length ? queue.map((client) => <div className="queue-row" key={client.id}><div><strong>{client.name}</strong><span>#{client.ticket}</span></div><Button className="small danger" onClick={() => requestSkip(client)}><Icon name="person-dash" />سحب</Button></div>) : <p className="empty">ما كاين حتى واحد كيتسنى.</p>}{barber.queue.length > 3 && <Button className="full secondary" onClick={() => setExpanded(!expanded)}><Icon name={expanded ? "chevron-up" : "chevron-down"} />{expanded ? "شوف أقل" : "شوف كتر"}</Button>}</section><ErrorText error={error} /></section>{confirmation && <ConfirmationModal {...confirmation} onCancel={() => setConfirmation(null)} />}</>;
 }
 
 function OwnerSettings({ session }) {

@@ -25,6 +25,7 @@ export default async function handler(req, res) {
       if (!barber) return send(res, 404, { error: "الحلاق ما كاينش" });
       if (barber.status !== "OPEN") return send(res, 409, { error: "الحلاق ماشي محلول" });
       const next = barber.queue.shift();
+      if (!next) return send(res, 409, { error: "ما كاين حتى كليان فالنوبة" });
       if (next) barber.currentlyServing = next.ticket;
       await saveData(data);
       return send(res, 200, publicState(data));
