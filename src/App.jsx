@@ -204,7 +204,9 @@ function BarberDashboard({ session }) {
   }
   function requestStatus(nextStatus) {
     if (nextStatus !== "CLOSED_FOR_DAY") {
-      request("/barbers", { method: "PATCH", body: JSON.stringify({ action: "status", barberId: barber.id, status: nextStatus }) });
+      request("/barbers", { method: "PATCH", body: JSON.stringify({ action: "status", barberId: barber.id, status: nextStatus }) })
+        .then((result) => { setState(result.state || result); setError(""); })
+        .catch((requestError) => setError(requestError.message));
       return;
     }
     setConfirmation({
@@ -214,7 +216,9 @@ function BarberDashboard({ session }) {
       confirmLabel: "نعم، ساليت اليوم",
       danger: true,
       onConfirm: () => {
-        request("/barbers", { method: "PATCH", body: JSON.stringify({ action: "status", barberId: barber.id, status: "CLOSED_FOR_DAY" }) });
+        request("/barbers", { method: "PATCH", body: JSON.stringify({ action: "status", barberId: barber.id, status: "CLOSED_FOR_DAY" }) })
+          .then((result) => { setState(result.state || result); setError(""); })
+          .catch((requestError) => setError(requestError.message));
         setConfirmation(null);
       },
     });
@@ -225,8 +229,9 @@ function BarberDashboard({ session }) {
 function OwnerSettings({ session }) {
   const [state, setState] = useState({ barbers: [], ads: [] }); const [name, setName] = useState(""); const [password, setPassword] = useState(""); const [ad, setAd] = useState({ imageUrl: "", description: "" }); const navigate = useNavigate();
   const [confirmation, setConfirmation] = useState(null);
-  useStatePolling(setState);
-  async function addBarber(e) { e.preventDefault(); if (!name || !password) return; await request("/barbers", { method: "POST", body: JSON.stringify({ name, password }) }); setName(""); setPassword(""); }
+  const [error, setError] = useState("");
+  useStatePolling(setState, setError);
+  async function addBarber(e) { e.preventDefault(); if (!name || !password) return; try { const nextState = await request("/barbers", { method: "POST", body: JSON.stringify({ name, password }) }); setState(nextState); setName(""); setPassword(""); setError(""); } catch (requestError) { setError(requestError.message); } }
   function editBarber(barber) {
     setConfirmation({
       icon: "pencil",
@@ -236,7 +241,7 @@ function OwnerSettings({ session }) {
       children: <input className="modal-input" type="password" placeholder="الباسوورد الجديد" id="new-barber-password" />,
       onConfirm: async () => {
         const next = document.getElementById("new-barber-password")?.value.trim();
-        if (next) await request("/barbers", { method: "PATCH", body: JSON.stringify({ action: "edit", barberId: barber.id, password: next }) });
+        if (next) { const nextState = await request("/barbers", { method: "PATCH", body: JSON.stringify({ action: "edit", barberId: barber.id, password: next }) }); setState(nextState); }
         setConfirmation(null);
       },
     });
@@ -248,12 +253,25 @@ function OwnerSettings({ session }) {
       message: `واش باغي تحيد ${barber.name}؟`,
       danger: true,
       confirmLabel: "حدف الحلاق",
-      onConfirm: async () => { await request("/barbers", { method: "DELETE", body: JSON.stringify({ barberId: barber.id }) }); setConfirmation(null); },
+      onConfirm: async () => { try { const nextState = await request("/barbers", { method: "DELETE", body: JSON.stringify({ barberId: barber.id }) }); setState(nextState); setError(""); } catch (requestError) { setError(requestError.message); } setConfirmation(null); },
     });
   }
-  async function saveAd(e) { e.preventDefault(); await request("/ads", { method: "PUT", body: JSON.stringify({ ads: [...state.ads, ad].slice(0, 3) }) }); setAd({ imageUrl: "", description: "" }); }
+  async function saveAd(e) {
+    e.preventDefault();
+    if (!ad.description.trim() && !ad.imageUrl.trim()) return;
+    const nextAd = { ...ad, id: state.ads[0]?.id };
+    const ads = state.ads.length >= 3 ? [nextAd, ...state.ads.slice(1)] : [...state.ads, nextAd];
+    try {
+      const nextState = await request("/ads", { method: "PUT", body: JSON.stringify({ ads }) });
+      setState(nextState);
+      setAd({ imageUrl: "", description: "" });
+      setError("");
+    } catch (error) {
+      setError(error.message);
+    }
+  }
   // OWNER DASHBOARD VIEW (/admin/owner): barber and advertisement management
-  return <><header className="admin-head"><div><span className="eyebrow">OWNER MODE</span><h2>الإعدادات</h2></div><button className="mini-link" onClick={() => { localStorage.removeItem("adminSession"); navigate("/admin/login"); }}><Icon name="box-arrow-right" />خروج</button></header><section className="admin-content settings-content"><div className="owner-tabs"><Link to="/admin/barber"><Icon name="scissors" />الخدمة</Link><span className="selected"><Icon name="gear" />الإعدادات</span></div><section className="panel"><div className="section-title"><h3>الحلاقين</h3><span>{state.barbers.length}/∞</span></div><form onSubmit={addBarber} className="stack-form"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="اسم الحلاق" /><input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="الباسوورد" /><Button type="submit"><Icon name="plus-lg" />زيد حلاق</Button></form>{state.barbers.map((barber) => <div className="manage-row" key={barber.id}><span>{barber.name}</span><div><Button className="small secondary" onClick={() => editBarber(barber)}><Icon name="pencil" />بدل</Button><Button className="small danger" onClick={() => removeBarber(barber)}><Icon name="trash3" />حدف</Button></div></div>)}</section><section className="panel"><div className="section-title"><h3>الإعلانات <span className="stamp">AD</span></h3><span>{state.ads.length}/3</span></div><form onSubmit={saveAd} className="stack-form"><input value={ad.imageUrl} onChange={(e) => setAd({ ...ad, imageUrl: e.target.value })} placeholder="رابط الصورة (اختياري)" /><textarea value={ad.description} onChange={(e) => setAd({ ...ad, description: e.target.value })} placeholder="النص ديال الإعلان" rows="3" /><Button type="submit" disabled={state.ads.length >= 3}><Icon name="save" />حفظ الإعلان</Button></form></section></section>{confirmation && <ConfirmationModal {...confirmation} onCancel={() => setConfirmation(null)} />}</>;
+  return <><header className="admin-head"><div><span className="eyebrow">OWNER MODE</span><h2>الإعدادات</h2></div><button className="mini-link" onClick={() => { localStorage.removeItem("adminSession"); navigate("/admin/login"); }}><Icon name="box-arrow-right" />خروج</button></header><section className="admin-content settings-content"><div className="owner-tabs"><Link to="/admin/barber"><Icon name="scissors" />الخدمة</Link><span className="selected"><Icon name="gear" />الإعدادات</span></div><section className="panel"><div className="section-title"><h3>الحلاقين</h3><span>{state.barbers.length}/∞</span></div><form onSubmit={addBarber} className="stack-form"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="اسم الحلاق" /><input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="الباسوورد" /><Button type="submit"><Icon name="plus-lg" />زيد حلاق</Button></form>{state.barbers.map((barber) => <div className="manage-row" key={barber.id}><span>{barber.name}</span><div><Button className="small secondary" onClick={() => editBarber(barber)}><Icon name="pencil" />بدل</Button><Button className="small danger" onClick={() => removeBarber(barber)}><Icon name="trash3" />حدف</Button></div></div>)}</section><section className="panel"><div className="section-title"><h3>الإعلانات <span className="stamp">AD</span></h3><span>{state.ads.length}/3</span></div><form onSubmit={saveAd} className="stack-form"><input value={ad.imageUrl} onChange={(e) => setAd({ ...ad, imageUrl: e.target.value })} placeholder="رابط الصورة (اختياري)" /><textarea value={ad.description} onChange={(e) => setAd({ ...ad, description: e.target.value })} placeholder="النص ديال الإعلان" rows="3" /><Button type="submit" disabled={!ad.description.trim() && !ad.imageUrl.trim()}><Icon name="save" />{state.ads.length >= 3 ? "بدل الإعلان" : "حفظ الإعلان"}</Button></form></section><ErrorText error={error} /></section>{confirmation && <ConfirmationModal {...confirmation} onCancel={() => setConfirmation(null)} />}</>;
 }
 
 export function AdminView() {
