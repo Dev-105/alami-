@@ -1,6 +1,7 @@
 import { getData, saveData, publicState, resetDailyQueues } from "../lib/store.js";
 
 function send(res, status, body) {
+  res.setHeader("Content-Type", "application/json");
   res.status(status).json(body);
 }
 
