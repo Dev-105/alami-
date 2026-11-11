@@ -168,6 +168,7 @@ export default async function handler(req, res) {
     return send(res, 404, { error: "المسار ما كاينش" });
   } catch (error) {
     console.error("API error:", error);
-    return send(res, 500, { error: "وقع مشكل فالسيرفر" });
+    const message = error instanceof Error ? error.message : "وقع مشكل فالسيرفر";
+    return send(res, 500, { error: message });
   }
 };
