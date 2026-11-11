@@ -112,7 +112,7 @@ button { cursor: pointer; }
 .muted { color: #6b7d73; font-size: 14px; line-height: 1.55; }
 
 /* ---- Barber tabs ---- */
-.barber-tabs {
+/* .barber-tabs {
   display: flex; gap: 8px; overflow-x: auto;
   padding: 2px 0 18px; scrollbar-width: none;
 }
@@ -137,8 +137,40 @@ button { cursor: pointer; }
 .barber-tabs small { display: block; font-size: 11px; margin-top: 3px; opacity: .9; }
 .open-dot:before, .closed-dot:before { content: "•"; margin-inline-end: 4px; font-size: 14px; }
 .open-dot { color: var(--ok); }
+.closed-dot { color: var(--warn); } */
+/* ---- Barber tabs ---- */
+.barber-tabs {
+  display: flex; gap: 8px; overflow-x: auto;
+  padding: 2px 0 18px; scrollbar-width: none;
+}
+.barber-tabs::-webkit-scrollbar { display: none; }
+
+.barber-tabs button {
+  flex: 0 0 auto; min-width: 112px; min-height: 56px;
+  border: 1px solid var(--glass-stroke);
+  border-radius: var(--radius-md);
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: blur(20px) saturate(140%);
+  color: #8a9d92; text-align: start; padding: 10px 12px;
+  box-shadow: var(--glass-inner), 0 6px 16px -6px rgb(0 0 0 / .80);
+  transition: transform 180ms ease, background 180ms ease, box-shadow 180ms ease, color 180ms ease;
+}
+.barber-tabs button.active {
+  color: var(--on-accent);
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent));
+  border-color: rgb(20 122 71 / .45);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .18), 0 10px 22px -8px var(--accent-glow);
+}
+.barber-tabs small { display: block; font-size: 11px; margin-top: 3px; opacity: .9; }
+
+.open-dot:before, .closed-dot:before {
+  content: "•"; margin-inline-end: 4px; font-size: 14px;
+}
+.open-dot { color: var(--ok); }
 .closed-dot { color: var(--warn); }
 
+.refresh-button { margin-bottom: 16px; }
 /* ---- Serving hero ---- */
 /* .serving-card, .now-card {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
