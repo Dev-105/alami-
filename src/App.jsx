@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import ConfirmationModal from "./ConfirmationModal";
 
@@ -27,18 +27,97 @@ function ErrorText({ error }) { return error ? <p className="error">{error}</p> 
 function barberStatus(barber) {
   return barber.status || (barber.isOpen === false ? "CLOSED_FOR_DAY" : "OPEN");
 }
+const STATE_REFRESH_COOLDOWN = 20000;
+const LAST_STATE_REFRESH_KEY = "last_state_refresh_time";
+const PAUSED_STATE_REFRESH_KEY = "paused_state_refresh_time";
+
 function useStatePolling(setState, setError) {
+  const [secondsRemaining, setSecondsRemaining] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false);
+  const refresh = useCallback(async () => {
+    if (document.hidden || refreshingRef.current) return false;
+    const lastRefresh = Number(sessionStorage.getItem(LAST_STATE_REFRESH_KEY) || 0);
+    if (lastRefresh && Date.now() - lastRefresh < STATE_REFRESH_COOLDOWN) {
+      setSecondsRemaining(Math.ceil((STATE_REFRESH_COOLDOWN - (Date.now() - lastRefresh)) / 1000));
+      return false;
+    }
+    refreshingRef.current = true;
+    setRefreshing(true);
+    try {
+      const nextState = await request("/state");
+      setState(nextState);
+      sessionStorage.setItem(LAST_STATE_REFRESH_KEY, String(Date.now()));
+      sessionStorage.removeItem(PAUSED_STATE_REFRESH_KEY);
+      setSecondsRemaining(STATE_REFRESH_COOLDOWN / 1000);
+      if (setError) setError("");
+      return true;
+    } catch (error) {
+      if (setError) setError(error.message);
+      return false;
+    } finally {
+      refreshingRef.current = false;
+      setRefreshing(false);
+    }
+  }, [setError, setState]);
+
   useEffect(() => {
-    let active = true;
-    const sync = () => request("/state").then((nextState) => {
-      if (active) setState(nextState);
-    }).catch((error) => {
-      if (active && setError) setError(error.message);
-    });
-    sync();
-    const interval = setInterval(sync, 3000);
-    return () => { active = false; clearInterval(interval); };
-  }, [setState, setError]);
+    let countdown;
+    const updateCountdown = () => {
+      const lastRefresh = Number(sessionStorage.getItem(LAST_STATE_REFRESH_KEY) || 0);
+      const remaining = lastRefresh
+        ? Math.max(0, Math.ceil((STATE_REFRESH_COOLDOWN - (Date.now() - lastRefresh)) / 1000))
+        : 0;
+      setSecondsRemaining(remaining);
+      if (!remaining && countdown) {
+        clearInterval(countdown);
+        countdown = undefined;
+      }
+    };
+    const resume = () => {
+      const pausedAt = Number(sessionStorage.getItem(PAUSED_STATE_REFRESH_KEY) || 0);
+      if (pausedAt) {
+        const lastRefresh = Number(sessionStorage.getItem(LAST_STATE_REFRESH_KEY) || 0);
+        sessionStorage.setItem(LAST_STATE_REFRESH_KEY, String(lastRefresh + Date.now() - pausedAt));
+        sessionStorage.removeItem(PAUSED_STATE_REFRESH_KEY);
+      }
+      updateCountdown();
+      if (!countdown && !document.hidden) {
+        countdown = setInterval(updateCountdown, 1000);
+        if (!sessionStorage.getItem(LAST_STATE_REFRESH_KEY)) refresh();
+      }
+    };
+    const pause = () => {
+      if (countdown) {
+        clearInterval(countdown);
+        countdown = undefined;
+      }
+      const lastRefresh = Number(sessionStorage.getItem(LAST_STATE_REFRESH_KEY) || 0);
+      if (lastRefresh && Date.now() - lastRefresh < STATE_REFRESH_COOLDOWN) {
+        sessionStorage.setItem(PAUSED_STATE_REFRESH_KEY, String(Date.now()));
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.hidden) pause();
+      else resume();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    updateCountdown();
+    if (!document.hidden) {
+      countdown = setInterval(updateCountdown, 1000);
+      if (!sessionStorage.getItem(LAST_STATE_REFRESH_KEY)) refresh();
+    }
+    return () => {
+      if (countdown) clearInterval(countdown);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [refresh]);
+
+  return { refresh, refreshing, secondsRemaining };
+}
+
+function RefreshButton({ refresh, refreshing, secondsRemaining }) {
+  return <Button className="refresh-button secondary" disabled={refreshing || secondsRemaining > 0} onClick={refresh}><Icon name={refreshing ? "arrow-repeat" : "arrow-clockwise"} className={refreshing ? "loading-spinner" : ""} />{refreshing ? "جاري التحديث..." : secondsRemaining > 0 ? `إعادة التحميل (${secondsRemaining}s)` : "إعادة التحميل"}</Button>;
 }
 
 function ClientView() {
@@ -52,6 +131,7 @@ function ClientView() {
   const [confirmation, setConfirmation] = useState(null);
   const [handoff, setHandoff] = useState(null);
   const previousState = useRef(null);
+  const refreshState = useStatePolling(setState, setError);
   useEffect(() => {
     const storedTicket = JSON.parse(localStorage.getItem("clientTicket") || "null");
     if (storedTicket?.date && storedTicket.date !== new Date().toISOString().slice(0, 10)) {
@@ -59,7 +139,6 @@ function ClientView() {
       localStorage.removeItem("clientTicket");
     }
   }, []);
-  useStatePolling(setState, setError);
   useEffect(() => {
     const previous = previousState.current;
     if (previous) {
@@ -150,7 +229,7 @@ function ClientView() {
   }
   // CLIENT VIEW (/): public queue and ticket interface
   return <Shell><section className="intro"><p className="kicker">خد نوبتك بلا صداع</p><h2>اختار الحلاق ديالك</h2><p className="muted">شوف شحال باقي ليك وخليك مرتاح.</p></section>
-    <nav className="barber-tabs" aria-label="الحلاقين">{state.barbers.map((barber) => <button key={barber.id} className={barber.id === selected?.id ? "active" : ""} onClick={() => { setSelectedId(barber.id); localStorage.setItem("selectedBarber", barber.id); }}>{barber.name}<small className={`${barberStatus(barber).toLowerCase()}-dot`}>{barberStatus(barber) === "OPEN" ? "شغال" : barberStatus(barber) === "PAUSED" ? "استراحة" : "ساليت اليوم"}</small></button>)}</nav>
+    <nav className="barber-tabs" aria-label="الحلاقين">{state.barbers.map((barber) => <button key={barber.id} className={barber.id === selected?.id ? "active" : ""} onClick={() => { setSelectedId(barber.id); localStorage.setItem("selectedBarber", barber.id); }}>{barber.name}<small className={`${barberStatus(barber).toLowerCase()}-dot`}>{barberStatus(barber) === "OPEN" ? "شغال" : barberStatus(barber) === "PAUSED" ? "استراحة" : "ساليت اليوم"}</small></button>)}</nav><RefreshButton {...refreshState} />
     {selected && <><div className="serving-card"><span>دابا فـ الكرسي</span><strong>#{selected.currentlyServing || "—"}</strong><small>{selected.name}</small></div>
       <section className="queue-preview" aria-label={`النوبة عند ${selected.name}`}>
         <div className="queue-preview-heading"><strong>النوبة دابا</strong><span className="waiting-count">{selected.queue.length ? `${selected.queue.length} أشخاص فـ الانتظار` : "لا يوجد انتظار - دورك فوراً!"}</span></div>
@@ -184,7 +263,7 @@ function BarberDashboard({ session }) {
   const [confirmation, setConfirmation] = useState(null);
   const [error, setError] = useState("");
   const navigate = useNavigate();
-  useStatePolling(setState, setError);
+  const refreshState = useStatePolling(setState, setError);
   if (!barber) return null;
   const queue = expanded ? barber.queue : barber.queue.slice(0, 3);
   // BARBER DASHBOARD VIEW (/admin/barber): queue control for the selected chair
@@ -232,14 +311,14 @@ function BarberDashboard({ session }) {
       },
     });
   }
-  return <><header className="admin-head"><div><span className="eyebrow">BARBER MODE</span><h2>{barber.name}</h2></div><button className="mini-link" onClick={() => { localStorage.removeItem("adminSession"); navigate("/admin/login"); }}><Icon name="box-arrow-right" />خروج</button></header><section className="admin-content"><div className="barber-controls"><Button disabled={barberStatus(barber) !== "OPEN"} onClick={nextClient}><Icon name="skip-forward-fill" />دوز اللي موراه</Button><select className={`status-select ${barberStatus(barber).toLowerCase()}`} value={barberStatus(barber)} onChange={(event) => requestStatus(event.target.value)}><option value="OPEN">شغال</option><option value="PAUSED">استراحة</option><option value="CLOSED_FOR_DAY">ساليت اليوم</option></select></div><div className="now-card"><span>دابا فـ الكرسي</span><strong>#{barber.currentlyServing || "—"}</strong></div><section className="queue-section"><div className="section-title"><h3>الناس فـ النوبة</h3><span>{barber.queue.length} مسجلين</span></div>{queue.length ? queue.map((client) => <div className="queue-row" key={client.id}><div><strong>{client.name}</strong><span>#{client.ticket}</span></div><Button className="small danger" onClick={() => requestSkip(client)}><Icon name="person-dash" />سحب</Button></div>) : <p className="empty">ما كاين حتى واحد كيتسنى.</p>}{barber.queue.length > 3 && <Button className="full secondary" onClick={() => setExpanded(!expanded)}><Icon name={expanded ? "chevron-up" : "chevron-down"} />{expanded ? "شوف أقل" : "شوف كتر"}</Button>}</section><ErrorText error={error} /></section>{confirmation && <ConfirmationModal {...confirmation} onCancel={() => setConfirmation(null)} />}</>;
+  return <><header className="admin-head"><div><span className="eyebrow">BARBER MODE</span><h2>{barber.name}</h2></div><button className="mini-link" onClick={() => { localStorage.removeItem("adminSession"); navigate("/admin/login"); }}><Icon name="box-arrow-right" />خروج</button></header><section className="admin-content"><RefreshButton {...refreshState} /><div className="barber-controls"><Button disabled={barberStatus(barber) !== "OPEN"} onClick={nextClient}><Icon name="skip-forward-fill" />دوز اللي موراه</Button><select className={`status-select ${barberStatus(barber).toLowerCase()}`} value={barberStatus(barber)} onChange={(event) => requestStatus(event.target.value)}><option value="OPEN">شغال</option><option value="PAUSED">استراحة</option><option value="CLOSED_FOR_DAY">ساليت اليوم</option></select></div><div className="now-card"><span>دابا فـ الكرسي</span><strong>#{barber.currentlyServing || "—"}</strong></div><section className="queue-section"><div className="section-title"><h3>الناس فـ النوبة</h3><span>{barber.queue.length} مسجلين</span></div>{queue.length ? queue.map((client) => <div className="queue-row" key={client.id}><div><strong>{client.name}</strong><span>#{client.ticket}</span></div><Button className="small danger" onClick={() => requestSkip(client)}><Icon name="person-dash" />سحب</Button></div>) : <p className="empty">ما كاين حتى واحد كيتسنى.</p>}{barber.queue.length > 3 && <Button className="full secondary" onClick={() => setExpanded(!expanded)}><Icon name={expanded ? "chevron-up" : "chevron-down"} />{expanded ? "شوف أقل" : "شوف كتر"}</Button>}</section><ErrorText error={error} /></section>{confirmation && <ConfirmationModal {...confirmation} onCancel={() => setConfirmation(null)} />}</>;
 }
 
 function OwnerSettings({ session }) {
   const [state, setState] = useState({ barbers: [], ads: [] }); const [name, setName] = useState(""); const [password, setPassword] = useState(""); const [ad, setAd] = useState({ imageUrl: "", description: "" }); const [editingAdId, setEditingAdId] = useState(null); const navigate = useNavigate();
   const [confirmation, setConfirmation] = useState(null);
   const [error, setError] = useState("");
-  useStatePolling(setState, setError);
+  const refreshState = useStatePolling(setState, setError);
   async function addBarber(e) { e.preventDefault(); if (!name || !password) return; try { const nextState = await request("/barbers", { method: "POST", body: JSON.stringify({ name, password }) }); setState(nextState); setName(""); setPassword(""); setError(""); } catch (requestError) { setError(requestError.message); } }
   function editBarber(barber) {
     setConfirmation({
@@ -304,7 +383,7 @@ function OwnerSettings({ session }) {
     }
   }
   // OWNER DASHBOARD VIEW (/admin/owner): barber and advertisement management
-  return <><header className="admin-head"><div><span className="eyebrow">OWNER MODE</span><h2>الإعدادات</h2></div><button className="mini-link" onClick={() => { localStorage.removeItem("adminSession"); navigate("/admin/login"); }}><Icon name="box-arrow-right" />خروج</button></header><section className="admin-content settings-content"><div className="owner-tabs"><Link to="/admin/barber"><Icon name="scissors" />الخدمة</Link><span className="selected"><Icon name="gear" />الإعدادات</span></div><section className="panel"><div className="section-title"><h3>الحلاقين</h3><span>{state.barbers.length}/∞</span></div><form onSubmit={addBarber} className="stack-form"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="اسم الحلاق" /><input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="الباسوورد" /><Button type="submit"><Icon name="plus-lg" />زيد حلاق</Button></form>{state.barbers.map((barber) => <div className="manage-row" key={barber.id}><span>{barber.name}</span><div><Button className="small secondary" onClick={() => editBarber(barber)}><Icon name="pencil" />بدل</Button><Button className="small danger" onClick={() => removeBarber(barber)}><Icon name="trash3" />حدف</Button></div></div>)}</section><section className="panel"><div className="section-title"><h3>الإعلانات <span className="stamp">AD</span></h3><span>{state.ads.length}/3</span></div><form onSubmit={saveAd} className="stack-form"><input value={ad.imageUrl} onChange={(e) => setAd({ ...ad, imageUrl: e.target.value })} placeholder="رابط الصورة (اختياري)" /><textarea value={ad.description} onChange={(e) => setAd({ ...ad, description: e.target.value })} placeholder="النص ديال الإعلان" rows="3" /><div className="ad-form-actions"><Button type="submit" disabled={!ad.description.trim() && !ad.imageUrl.trim()}><Icon name={editingAdId ? "pencil" : "save"} />{editingAdId ? "حفظ التعديل" : state.ads.length >= 3 ? "بدل الإعلان" : "حفظ الإعلان"}</Button>{editingAdId && <Button type="button" className="secondary" onClick={() => { setEditingAdId(null); setAd({ imageUrl: "", description: "" }); }}>إلغاء</Button>}</div></form><div className="ads-list">{state.ads.length ? state.ads.map((item) => <article className="ad-manage-row" key={item.id}>{item.imageUrl && <img src={item.imageUrl} alt="" /> }<div className="ad-manage-copy"><span className="stamp">AD</span><p>{item.description || "إعلان بلا نص"}</p>{item.imageUrl && <small>{item.imageUrl}</small>}</div><div className="ad-manage-actions"><Button className="small secondary" onClick={() => editAd(item)}><Icon name="pencil" />بدل</Button><Button className="small danger" onClick={() => removeAd(item)}><Icon name="trash3" />حدف</Button></div></article>) : <p className="empty">ما كاين حتى إعلان دابا.</p>}</div></section><ErrorText error={error} /></section>{confirmation && <ConfirmationModal {...confirmation} onCancel={() => setConfirmation(null)} />}</>;
+  return <><header className="admin-head"><div><span className="eyebrow">OWNER MODE</span><h2>الإعدادات</h2></div><button className="mini-link" onClick={() => { localStorage.removeItem("adminSession"); navigate("/admin/login"); }}><Icon name="box-arrow-right" />خروج</button></header><section className="admin-content settings-content"><RefreshButton {...refreshState} /><div className="owner-tabs"><Link to="/admin/barber"><Icon name="scissors" />الخدمة</Link><span className="selected"><Icon name="gear" />الإعدادات</span></div><section className="panel"><div className="section-title"><h3>الحلاقين</h3><span>{state.barbers.length}/∞</span></div><form onSubmit={addBarber} className="stack-form"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="اسم الحلاق" /><input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="الباسوورد" /><Button type="submit"><Icon name="plus-lg" />زيد حلاق</Button></form>{state.barbers.map((barber) => <div className="manage-row" key={barber.id}><span>{barber.name}</span><div><Button className="small secondary" onClick={() => editBarber(barber)}><Icon name="pencil" />بدل</Button><Button className="small danger" onClick={() => removeBarber(barber)}><Icon name="trash3" />حدف</Button></div></div>)}</section><section className="panel"><div className="section-title"><h3>الإعلانات <span className="stamp">AD</span></h3><span>{state.ads.length}/3</span></div><form onSubmit={saveAd} className="stack-form"><input value={ad.imageUrl} onChange={(e) => setAd({ ...ad, imageUrl: e.target.value })} placeholder="رابط الصورة (اختياري)" /><textarea value={ad.description} onChange={(e) => setAd({ ...ad, description: e.target.value })} placeholder="النص ديال الإعلان" rows="3" /><div className="ad-form-actions"><Button type="submit" disabled={!ad.description.trim() && !ad.imageUrl.trim()}><Icon name={editingAdId ? "pencil" : "save"} />{editingAdId ? "حفظ التعديل" : state.ads.length >= 3 ? "بدل الإعلان" : "حفظ الإعلان"}</Button>{editingAdId && <Button type="button" className="secondary" onClick={() => { setEditingAdId(null); setAd({ imageUrl: "", description: "" }); }}>إلغاء</Button>}</div></form><div className="ads-list">{state.ads.length ? state.ads.map((item) => <article className="ad-manage-row" key={item.id}>{item.imageUrl && <img src={item.imageUrl} alt="" /> }<div className="ad-manage-copy"><span className="stamp">AD</span><p>{item.description || "إعلان بلا نص"}</p>{item.imageUrl && <small>{item.imageUrl}</small>}</div><div className="ad-manage-actions"><Button className="small secondary" onClick={() => editAd(item)}><Icon name="pencil" />بدل</Button><Button className="small danger" onClick={() => removeAd(item)}><Icon name="trash3" />حدف</Button></div></article>) : <p className="empty">ما كاين حتى إعلان دابا.</p>}</div></section><ErrorText error={error} /></section>{confirmation && <ConfirmationModal {...confirmation} onCancel={() => setConfirmation(null)} />}</>;
 }
 
 export function AdminView() {
