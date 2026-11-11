@@ -8,7 +8,12 @@ localStorage.setItem("queueClientId", clientId);
 
 async function request(path, options = {}) {
   const response = await fetch(`${API}${path}`, { headers: { "Content-Type": "application/json" }, ...options });
-  const body = response.status === 204 ? {} : await response.json();
+  const contentType = response.headers.get("content-type") || "";
+  if (response.status === 204) return {};
+  if (!contentType.includes("application/json")) {
+    throw new Error(`تعذر الاتصال بالـ API (${response.status})`);
+  }
+  const body = await response.json();
   if (!response.ok) throw new Error(body.error || "وقع مشكل");
   return body;
 }
