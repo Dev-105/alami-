@@ -4,4 +4,4 @@ node_modules/
 !.env.example
 
 frontend/dist/
-backend/data.json.tmp
+.vercel/

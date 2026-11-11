@@ -1,0 +1,11 @@
+{
+  "name": "salon-alami-vercel",
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix frontend install && npm --prefix frontend run build",
+    "install:frontend": "npm --prefix frontend install"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.35.0"
+  }
+}

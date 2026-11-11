@@ -1,15 +1,14 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { socket } from "./socket";
 import ConfirmationModal from "./ConfirmationModal";
 
-const API = `${import.meta.env.VITE_BACKEND_URL || "http://localhost:3000"}/api`;
+const API = "/api";
 const clientId = localStorage.getItem("queueClientId") || crypto.randomUUID();
 localStorage.setItem("queueClientId", clientId);
 
 async function request(path, options = {}) {
   const response = await fetch(`${API}${path}`, { headers: { "Content-Type": "application/json" }, ...options });
-  const body = await response.json();
+  const body = response.status === 204 ? {} : await response.json();
   if (!response.ok) throw new Error(body.error || "وقع مشكل");
   return body;
 }
@@ -23,6 +22,19 @@ function ErrorText({ error }) { return error ? <p className="error">{error}</p> 
 function barberStatus(barber) {
   return barber.status || (barber.isOpen === false ? "CLOSED_FOR_DAY" : "OPEN");
 }
+function useStatePolling(setState, setError) {
+  useEffect(() => {
+    let active = true;
+    const sync = () => request("/state").then((nextState) => {
+      if (active) setState(nextState);
+    }).catch((error) => {
+      if (active && setError) setError(error.message);
+    });
+    sync();
+    const interval = setInterval(sync, 3000);
+    return () => { active = false; clearInterval(interval); };
+  }, [setState, setError]);
+}
 
 function ClientView() {
   const [state, setState] = useState({ barbers: [], ads: [] });
@@ -33,33 +45,38 @@ function ClientView() {
   const [switchOpen, setSwitchOpen] = useState(false);
   const [confirmation, setConfirmation] = useState(null);
   const [handoff, setHandoff] = useState(null);
+  const previousState = useRef(null);
   useEffect(() => {
-    request("/state").then(setState).catch((e) => setError(e.message));
-    const handleState = (nextState) => setState(nextState);
-    const handleDailyReset = ({ state: nextState }) => {
-      setState(nextState);
+    const storedTicket = JSON.parse(localStorage.getItem("clientTicket") || "null");
+    if (storedTicket?.date && storedTicket.date !== new Date().toISOString().slice(0, 10)) {
       setTicket(null);
       localStorage.removeItem("clientTicket");
-    };
-    const handleBarberClosed = ({ barber, affectedClients }) => {
-      const affectedClient = affectedClients?.find((client) => client.id === clientId);
-      if (!affectedClient) return;
-      setTicket(null);
-      localStorage.removeItem("clientTicket");
-      setHandoff({ currentChairId: barber.id, clientName: affectedClient.name });
-      setConfirmation({
-        icon: "scissors",
-        title: `${barber.name} سالى خدمتو لليوم`,
-        message: "الحلاق ديالك سالى خدمتو لليوم. تقدر تحول لعند حلاق آخر مزال خدام ولا ترجع نهار آخر.",
-        confirmLabel: "تحول عند حلاق آخر",
-        onConfirm: () => { setConfirmation(null); setSwitchOpen(true); },
-      });
-    };
-    socket.on("state", handleState);
-    socket.on("dailyQueueReset", handleDailyReset);
-    socket.on("barberClosedForDay", handleBarberClosed);
-    return () => { socket.off("state", handleState); socket.off("dailyQueueReset", handleDailyReset); socket.off("barberClosedForDay", handleBarberClosed); };
+    }
   }, []);
+  useStatePolling(setState, setError);
+  useEffect(() => {
+    const previous = previousState.current;
+    if (previous) {
+      for (const barber of state.barbers) {
+        const oldBarber = previous.barbers.find((item) => item.id === barber.id);
+        const wasQueued = oldBarber?.queue.some((client) => client.id === clientId);
+        if (wasQueued && barberStatus(barber) === "CLOSED_FOR_DAY" && barberStatus(oldBarber) !== "CLOSED_FOR_DAY") {
+          const affectedClient = oldBarber.queue.find((client) => client.id === clientId);
+          setTicket(null);
+          localStorage.removeItem("clientTicket");
+          setHandoff({ currentChairId: barber.id, clientName: affectedClient.name });
+          setConfirmation({
+            icon: "scissors",
+            title: `${barber.name} سالى خدمتو لليوم`,
+            message: "الحلاق ديالك سالى خدمتو لليوم. تقدر تحول لعند حلاق آخر مزال خدام ولا ترجع نهار آخر.",
+            confirmLabel: "تحول عند حلاق آخر",
+            onConfirm: () => { setConfirmation(null); setSwitchOpen(true); },
+          });
+        }
+      }
+    }
+    previousState.current = state;
+  }, [state]);
   useEffect(() => { if (!selectedId && state.barbers[0]) setSelectedId(state.barbers[0].id); }, [state.barbers, selectedId]);
   const selected = state.barbers.find((barber) => barber.id === selectedId) || state.barbers[0];
   const activeTicket = useMemo(() => {
@@ -74,7 +91,7 @@ function ClientView() {
   const myTurn = currentTicket === selected?.currentlyServing;
   function rememberTicket(next) { setTicket(next); localStorage.setItem("clientTicket", JSON.stringify(next)); }
   async function join() {
-    try { localStorage.setItem("clientName", name); const result = await request("/queue/join", { method: "POST", body: JSON.stringify({ barberId: selected.id, name, clientId }) }); rememberTicket({ ...result.client, barberId: selected.id }); setError(""); } catch (e) { setError(e.message); }
+    try { localStorage.setItem("clientName", name); const result = await request("/queue/join", { method: "POST", body: JSON.stringify({ barberId: selected.id, name, clientId }) });     rememberTicket({ ...result.client, barberId: selected.id, date: new Date().toISOString().slice(0, 10) }); setError(""); } catch (e) { setError(e.message); }
   }
   async function leave() { if (!activeTicket) return; await request("/queue/leave", { method: "POST", body: JSON.stringify({ barberId: activeTicket.barberId, clientId }) }); rememberTicket(null); }
   function transferBarber(targetChairId) {
@@ -82,15 +99,14 @@ function ClientView() {
     if (!sourceChairId || targetChairId === sourceChairId) return;
     const target = state.barbers.find((barber) => barber.id === targetChairId);
     if (!target || barberStatus(target) === "CLOSED_FOR_DAY") return setError("هاد الحلاق سالى خدمتو لليوم");
-    socket.emit("switchBarberQueue", { clientId, currentChairId: sourceChairId, targetChairId, clientName: name || handoff?.clientName }, (result) => {
-      if (!result?.ok) return setError(result?.error || "ما قدرناش نبدلو الحلاق");
+    request("/queue/switch", { method: "POST", body: JSON.stringify({ clientId, fromBarberId: sourceChairId, toBarberId: targetChairId, name: name || handoff?.clientName }) }).then((result) => {
       setSelectedId(targetChairId);
       localStorage.setItem("selectedBarber", targetChairId);
-      rememberTicket({ ...result.client, barberId: targetChairId });
+      rememberTicket({ ...result.client, barberId: targetChairId, date: new Date().toISOString().slice(0, 10) });
       setHandoff(null);
       setSwitchOpen(false);
       setError("");
-    });
+    }).catch((error) => setError(error.message));
   }
   function requestBarberSwitch(targetChairId) {
     const target = state.barbers.find((barber) => barber.id === targetChairId);
@@ -141,14 +157,7 @@ function BarberDashboard({ session }) {
   const [state, setState] = useState({ barbers: [], ads: [] }); const barber = state.barbers.find((item) => item.id === session.barberId); const [expanded, setExpanded] = useState(false);
   const [confirmation, setConfirmation] = useState(null);
   const navigate = useNavigate();
-  useEffect(() => {
-    request("/state").then(setState);
-    const handleState = (nextState) => setState(nextState);
-    const handleDailyReset = ({ state: nextState }) => setState(nextState);
-    socket.on("state", handleState);
-    socket.on("dailyQueueReset", handleDailyReset);
-    return () => { socket.off("state", handleState); socket.off("dailyQueueReset", handleDailyReset); };
-  }, []);
+  useStatePolling(setState);
   if (!barber) return null;
   const queue = expanded ? barber.queue : barber.queue.slice(0, 3);
   // BARBER DASHBOARD VIEW (/admin/barber): queue control for the selected chair
@@ -159,12 +168,12 @@ function BarberDashboard({ session }) {
       message: `واش باغي تحيد ${client.name} من النوبة؟`,
       danger: true,
       confirmLabel: "حيد الكليان",
-      onConfirm: () => { socket.emit("skipClient", { barberId: barber.id, clientId: client.id }); setConfirmation(null); },
+      onConfirm: async () => { await request("/queue/skip", { method: "POST", body: JSON.stringify({ barberId: barber.id, clientId: client.id }) }); setConfirmation(null); },
     });
   }
   function requestStatus(nextStatus) {
     if (nextStatus !== "CLOSED_FOR_DAY") {
-      socket.emit("toggleStatus", { barberId: barber.id, status: nextStatus });
+      request(`/barbers/${barber.id}/status`, { method: "PATCH", body: JSON.stringify({ status: nextStatus }) });
       return;
     }
     setConfirmation({
@@ -174,25 +183,18 @@ function BarberDashboard({ session }) {
       confirmLabel: "نعم، ساليت اليوم",
       danger: true,
       onConfirm: () => {
-        socket.emit("toggleStatus", { barberId: barber.id, status: "CLOSED_FOR_DAY" });
+        request(`/barbers/${barber.id}/status`, { method: "PATCH", body: JSON.stringify({ status: "CLOSED_FOR_DAY" }) });
         setConfirmation(null);
       },
     });
   }
-  return <><header className="admin-head"><div><span className="eyebrow">BARBER MODE</span><h2>{barber.name}</h2></div><button className="mini-link" onClick={() => { localStorage.removeItem("adminSession"); navigate("/admin/login"); }}><Icon name="box-arrow-right" />خروج</button></header><section className="admin-content"><div className="barber-controls"><Button onClick={() => socket.emit("nextClient", { barberId: barber.id })}><Icon name="skip-forward-fill" />دوز اللي موراه</Button><select className={`status-select ${barberStatus(barber).toLowerCase()}`} value={barberStatus(barber)} onChange={(event) => requestStatus(event.target.value)}><option value="OPEN">شغال</option><option value="PAUSED">استراحة</option><option value="CLOSED_FOR_DAY">ساليت اليوم</option></select></div><div className="now-card"><span>دابا فـ الكرسي</span><strong>#{barber.currentlyServing || "—"}</strong></div><section className="queue-section"><div className="section-title"><h3>الناس فـ النوبة</h3><span>{barber.queue.length} مسجلين</span></div>{queue.length ? queue.map((client) => <div className="queue-row" key={client.id}><div><strong>{client.name}</strong><span>#{client.ticket}</span></div><Button className="small danger" onClick={() => requestSkip(client)}><Icon name="person-dash" />سحب</Button></div>) : <p className="empty">ما كاين حتى واحد كيتسنى.</p>}{barber.queue.length > 3 && <Button className="full secondary" onClick={() => setExpanded(!expanded)}><Icon name={expanded ? "chevron-up" : "chevron-down"} />{expanded ? "شوف أقل" : "شوف كتر"}</Button>}</section></section>{confirmation && <ConfirmationModal {...confirmation} onCancel={() => setConfirmation(null)} />}</>;
+  return <><header className="admin-head"><div><span className="eyebrow">BARBER MODE</span><h2>{barber.name}</h2></div><button className="mini-link" onClick={() => { localStorage.removeItem("adminSession"); navigate("/admin/login"); }}><Icon name="box-arrow-right" />خروج</button></header><section className="admin-content"><div className="barber-controls"><Button onClick={() => request(`/barbers/${barber.id}/next`, { method: "POST" })}><Icon name="skip-forward-fill" />دوز اللي موراه</Button><select className={`status-select ${barberStatus(barber).toLowerCase()}`} value={barberStatus(barber)} onChange={(event) => requestStatus(event.target.value)}><option value="OPEN">شغال</option><option value="PAUSED">استراحة</option><option value="CLOSED_FOR_DAY">ساليت اليوم</option></select></div><div className="now-card"><span>دابا فـ الكرسي</span><strong>#{barber.currentlyServing || "—"}</strong></div><section className="queue-section"><div className="section-title"><h3>الناس فـ النوبة</h3><span>{barber.queue.length} مسجلين</span></div>{queue.length ? queue.map((client) => <div className="queue-row" key={client.id}><div><strong>{client.name}</strong><span>#{client.ticket}</span></div><Button className="small danger" onClick={() => requestSkip(client)}><Icon name="person-dash" />سحب</Button></div>) : <p className="empty">ما كاين حتى واحد كيتسنى.</p>}{barber.queue.length > 3 && <Button className="full secondary" onClick={() => setExpanded(!expanded)}><Icon name={expanded ? "chevron-up" : "chevron-down"} />{expanded ? "شوف أقل" : "شوف كتر"}</Button>}</section></section>{confirmation && <ConfirmationModal {...confirmation} onCancel={() => setConfirmation(null)} />}</>;
 }
 
 function OwnerSettings({ session }) {
   const [state, setState] = useState({ barbers: [], ads: [] }); const [name, setName] = useState(""); const [password, setPassword] = useState(""); const [ad, setAd] = useState({ imageUrl: "", description: "" }); const navigate = useNavigate();
   const [confirmation, setConfirmation] = useState(null);
-  useEffect(() => {
-    request("/state").then(setState);
-    const handleState = (nextState) => setState(nextState);
-    const handleDailyReset = ({ state: nextState }) => setState(nextState);
-    socket.on("state", handleState);
-    socket.on("dailyQueueReset", handleDailyReset);
-    return () => { socket.off("state", handleState); socket.off("dailyQueueReset", handleDailyReset); };
-  }, []);
+  useStatePolling(setState);
   async function addBarber(e) { e.preventDefault(); if (!name || !password) return; await request("/barbers", { method: "POST", body: JSON.stringify({ name, password }) }); setName(""); setPassword(""); }
   function editBarber(barber) {
     setConfirmation({
