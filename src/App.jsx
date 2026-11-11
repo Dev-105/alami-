@@ -91,15 +91,15 @@ function ClientView() {
   const myTurn = currentTicket === selected?.currentlyServing;
   function rememberTicket(next) { setTicket(next); localStorage.setItem("clientTicket", JSON.stringify(next)); }
   async function join() {
-    try { localStorage.setItem("clientName", name); const result = await request("/queue/join", { method: "POST", body: JSON.stringify({ barberId: selected.id, name, clientId }) });     rememberTicket({ ...result.client, barberId: selected.id, date: new Date().toISOString().slice(0, 10) }); setError(""); } catch (e) { setError(e.message); }
+    try { localStorage.setItem("clientName", name); const result = await request("/queue", { method: "POST", body: JSON.stringify({ action: "join", barberId: selected.id, name, clientId }) });     rememberTicket({ ...result.client, barberId: selected.id, date: new Date().toISOString().slice(0, 10) }); setError(""); } catch (e) { setError(e.message); }
   }
-  async function leave() { if (!activeTicket) return; await request("/queue/leave", { method: "POST", body: JSON.stringify({ barberId: activeTicket.barberId, clientId }) }); rememberTicket(null); }
+  async function leave() { if (!activeTicket) return; await request("/queue", { method: "POST", body: JSON.stringify({ action: "leave", barberId: activeTicket.barberId, clientId }) }); rememberTicket(null); }
   function transferBarber(targetChairId) {
     const sourceChairId = queuedBarber?.id || handoff?.currentChairId;
     if (!sourceChairId || targetChairId === sourceChairId) return;
     const target = state.barbers.find((barber) => barber.id === targetChairId);
     if (!target || barberStatus(target) === "CLOSED_FOR_DAY") return setError("هاد الحلاق سالى خدمتو لليوم");
-    request("/queue/switch", { method: "POST", body: JSON.stringify({ clientId, fromBarberId: sourceChairId, toBarberId: targetChairId, name: name || handoff?.clientName }) }).then((result) => {
+    request("/queue", { method: "POST", body: JSON.stringify({ action: "switch", clientId, fromBarberId: sourceChairId, toBarberId: targetChairId, name: name || handoff?.clientName }) }).then((result) => {
       setSelectedId(targetChairId);
       localStorage.setItem("selectedBarber", targetChairId);
       rememberTicket({ ...result.client, barberId: targetChairId, date: new Date().toISOString().slice(0, 10) });
@@ -168,7 +168,7 @@ function BarberDashboard({ session }) {
       message: `واش باغي تحيد ${client.name} من النوبة؟`,
       danger: true,
       confirmLabel: "حيد الكليان",
-      onConfirm: async () => { await request("/queue/skip", { method: "POST", body: JSON.stringify({ barberId: barber.id, clientId: client.id }) }); setConfirmation(null); },
+      onConfirm: async () => { await request("/queue", { method: "POST", body: JSON.stringify({ action: "skip", barberId: barber.id, clientId: client.id }) }); setConfirmation(null); },
     });
   }
   function requestStatus(nextStatus) {
