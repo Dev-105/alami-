@@ -1,4 +1,4 @@
-const { getData, saveData, publicState, resetDailyQueues } = require("../lib/store");
+import { getData, saveData, publicState, resetDailyQueues } from "../lib/store.js";
 
 function send(res, status, body) {
   res.status(status).json(body);
@@ -28,7 +28,7 @@ function bodyOf(req) {
   return req.body && typeof req.body === "object" ? req.body : {};
 }
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   try {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     const parts = url.pathname.replace(/^\/api\/?/, "").split("/").filter(Boolean);
