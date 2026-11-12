@@ -15,6 +15,7 @@ async function request(path, options = {}) {
   }
   const body = await response.json();
   if (!response.ok) throw new Error(body.error || "وقع مشكل");
+  cacheResponseState(path, body);
   return body;
 }
 
@@ -30,6 +31,38 @@ function barberStatus(barber) {
 const STATE_REFRESH_COOLDOWN = 20000;
 const LAST_STATE_REFRESH_KEY = "last_state_refresh_time";
 const PAUSED_STATE_REFRESH_KEY = "paused_state_refresh_time";
+const CACHED_STATE_KEY = "salon_alami_cached_state";
+
+function isApplicationState(value) {
+  return value && Array.isArray(value.barbers) && Array.isArray(value.ads);
+}
+
+function readCachedState() {
+  try {
+    const cached = JSON.parse(sessionStorage.getItem(CACHED_STATE_KEY) || "null");
+    return isApplicationState(cached) ? cached : { barbers: [], ads: [] };
+  } catch {
+    sessionStorage.removeItem(CACHED_STATE_KEY);
+    return { barbers: [], ads: [] };
+  }
+}
+
+function hasCachedState() {
+  try {
+    return isApplicationState(JSON.parse(sessionStorage.getItem(CACHED_STATE_KEY) || "null"));
+  } catch {
+    return false;
+  }
+}
+
+function cacheResponseState(path, body) {
+  const nextState = isApplicationState(body?.state)
+    ? body.state
+    : isApplicationState(body) && path !== "/login"
+      ? body
+      : null;
+  if (nextState) sessionStorage.setItem(CACHED_STATE_KEY, JSON.stringify(nextState));
+}
 
 function useStatePolling(setState, setError) {
   const [secondsRemaining, setSecondsRemaining] = useState(0);
@@ -38,7 +71,7 @@ function useStatePolling(setState, setError) {
   const refresh = useCallback(async () => {
     if (document.hidden || refreshingRef.current) return false;
     const lastRefresh = Number(sessionStorage.getItem(LAST_STATE_REFRESH_KEY) || 0);
-    if (lastRefresh && Date.now() - lastRefresh < STATE_REFRESH_COOLDOWN) {
+    if (hasCachedState() && lastRefresh && Date.now() - lastRefresh < STATE_REFRESH_COOLDOWN) {
       setSecondsRemaining(Math.ceil((STATE_REFRESH_COOLDOWN - (Date.now() - lastRefresh)) / 1000));
       return false;
     }
@@ -105,7 +138,9 @@ function useStatePolling(setState, setError) {
     updateCountdown();
     if (!document.hidden) {
       countdown = setInterval(updateCountdown, 1000);
-      if (!sessionStorage.getItem(LAST_STATE_REFRESH_KEY)) refresh();
+      const hasCachedStateValue = hasCachedState();
+      const lastRefresh = Number(sessionStorage.getItem(LAST_STATE_REFRESH_KEY) || 0);
+      if (!hasCachedStateValue || !lastRefresh || Date.now() - lastRefresh >= STATE_REFRESH_COOLDOWN) refresh();
     }
     return () => {
       if (countdown) clearInterval(countdown);
@@ -117,11 +152,11 @@ function useStatePolling(setState, setError) {
 }
 
 function RefreshButton({ refresh, refreshing, secondsRemaining }) {
-  return <Button className="refresh-button secondary" disabled={refreshing || secondsRemaining > 0} onClick={refresh}><Icon name={refreshing ? "arrow-repeat" : "arrow-clockwise"} className={refreshing ? "loading-spinner" : ""} />{refreshing ? "جاري التحديث..." : secondsRemaining > 0 ? `إعادة التحميل (${secondsRemaining}s)` : "إعادة التحميل"}</Button>;
+  return <Button className="refresh-button secondary" disabled={refreshing || secondsRemaining > 0} onClick={refresh}><Icon name={refreshing ? "arrow-repeat" : "arrow-clockwise"} className={`refresh-icon${refreshing ? " loading-spinner" : ""}`} />{refreshing ? "جاري التحديث..." : secondsRemaining > 0 ? `إعادة التحميل (${secondsRemaining}s)` : "إعادة التحميل"}</Button>;
 }
 
 function ClientView() {
-  const [state, setState] = useState({ barbers: [], ads: [] });
+  const [state, setState] = useState(readCachedState);
   const [selectedId, setSelectedId] = useState(localStorage.getItem("selectedBarber") || "");
   const [name, setName] = useState(localStorage.getItem("clientName") || "");
   const [ticket, setTicket] = useState(JSON.parse(localStorage.getItem("clientTicket") || "null"));
@@ -190,7 +225,7 @@ function ClientView() {
       setJoining(false);
     }
   }
-  async function leave() { if (!activeTicket) return; await request("/queue", { method: "POST", body: JSON.stringify({ action: "leave", barberId: activeTicket.barberId, clientId }) }); rememberTicket(null); }
+  async function leave() { if (!activeTicket) return; const result = await request("/queue", { method: "POST", body: JSON.stringify({ action: "leave", barberId: activeTicket.barberId, clientId }) }); if (result.state) setState(result.state); rememberTicket(null); }
   function transferBarber(targetChairId) {
     const sourceChairId = queuedBarber?.id || handoff?.currentChairId;
     if (!sourceChairId || targetChairId === sourceChairId) return;
@@ -259,7 +294,7 @@ function Login() {
 }
 
 function BarberDashboard({ session }) {
-  const [state, setState] = useState({ barbers: [], ads: [] }); const barber = state.barbers.find((item) => item.id === session.barberId); const [expanded, setExpanded] = useState(false);
+  const [state, setState] = useState(readCachedState); const barber = state.barbers.find((item) => item.id === session.barberId); const [expanded, setExpanded] = useState(false);
   const [confirmation, setConfirmation] = useState(null);
   const [error, setError] = useState("");
   const navigate = useNavigate();
@@ -287,7 +322,7 @@ function BarberDashboard({ session }) {
       message: `واش باغي تحيد ${client.name} من النوبة؟`,
       danger: true,
       confirmLabel: "حيد الكليان",
-      onConfirm: async () => { await request("/queue", { method: "POST", body: JSON.stringify({ action: "skip", barberId: barber.id, clientId: client.id }) }); setConfirmation(null); },
+      onConfirm: async () => { const result = await request("/queue", { method: "POST", body: JSON.stringify({ action: "skip", barberId: barber.id, clientId: client.id }) }); if (result.state) setState(result.state); setConfirmation(null); },
     });
   }
   function requestStatus(nextStatus) {
@@ -315,7 +350,7 @@ function BarberDashboard({ session }) {
 }
 
 function OwnerSettings({ session }) {
-  const [state, setState] = useState({ barbers: [], ads: [] }); const [name, setName] = useState(""); const [password, setPassword] = useState(""); const [ad, setAd] = useState({ imageUrl: "", description: "" }); const [editingAdId, setEditingAdId] = useState(null); const navigate = useNavigate();
+  const [state, setState] = useState(readCachedState); const [name, setName] = useState(""); const [password, setPassword] = useState(""); const [ad, setAd] = useState({ imageUrl: "", description: "" }); const [editingAdId, setEditingAdId] = useState(null); const navigate = useNavigate();
   const [confirmation, setConfirmation] = useState(null);
   const [error, setError] = useState("");
   const refreshState = useStatePolling(setState, setError);

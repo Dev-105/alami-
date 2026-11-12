@@ -4,8 +4,8 @@
   "description": "تسيير النوبة ديال الحلاقين",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f7f3ed",
-  "theme_color": "#171717",
+  "background_color": "#020604",
+  "theme_color": "#0d5c34",
   "dir": "rtl",
   "lang": "ar-MA",
   "icons": [
